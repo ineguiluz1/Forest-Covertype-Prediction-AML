@@ -1,23 +1,36 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.discriminant_analysis import StandardScaler
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 import optuna
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.pipeline import Pipeline
 
-# PARAMETERS
-ALGORITHM = ''
-DATASET = ''
+
+ALGORITHM = 'xgboost' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
+DATASET = 'smote_balanced' # file name without extension (e.g. 'equal_undersampled', 'smote_oversampled', 'original')
+CV_FOLDS = 5
+RANDOM_STATE = 42
+N_TRIALS = 50
 
 # LOAD DATA
-data = pd.read_csv(f'../data/processed/{DATASET}.csv')
+data = pd.read_parquet(f'data/processed/{DATASET}.parquet')
 
 # SPLIT DATA
 X = data.drop('Cover_Type', axis=1)
 y = data['Cover_Type']
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Encode labels to 0..n_classes-1 (XGBoost expects that)
+le = LabelEncoder()
+y_enc = le.fit_transform(y)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y_enc, test_size=0.2, random_state=RANDOM_STATE, stratify=y_enc
+)
 
 # HYPERPARAMETER TUNING
 if ALGORITHM == 'xgboost':
@@ -61,22 +74,54 @@ elif ALGORITHM == 'AdaBoost':
         'learning_rate': [0.01, 0.1, 0.2]
     }
     
+# CV splitter
+skf = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+
 # OPTUNA STUDY
-def objective(trial, params):
-    if ALGORITHM == 'xgboost':
-        model = XGBClassifier(**params)
-    elif ALGORITHM == 'lightgbm':
-        model = LGBMClassifier(**params)
-    elif ALGORITHM == 'RandomForest':
-        model = RandomForestClassifier(**params)
-    elif ALGORITHM == 'SVM':
-        model = SVC(**params)
-    elif ALGORITHM == 'LogisticRegression':
-        model = LogisticRegression(**params)
-    elif ALGORITHM == 'AdaBoost':
-        model = AdaBoostClassifier(**params)
-    
-    model.fit(X_train, y_train)
-    score = model.score(X_test, y_test)
-    return score
+def suggest_params(trial, grid):
+    params = {}
+    for key, values in grid.items():
+        # use categorical suggestion for list choices
+        params[key] = trial.suggest_categorical(key, values)
+    return params
+
+def make_model(algo, params):
+    if algo == 'xgboost':
+        return XGBClassifier(**params, eval_metric='mlogloss', n_jobs=-1, random_state=RANDOM_STATE)
+    if algo == 'lightgbm':
+        return LGBMClassifier(**params, n_jobs=-1, random_state=RANDOM_STATE)
+    if algo == 'RandomForest':
+        return RandomForestClassifier(**params, n_jobs=-1, random_state=RANDOM_STATE)
+    if algo == 'SVM':
+        return SVC(**params, probability=False, random_state=RANDOM_STATE)
+    if algo == 'LogisticRegression':
+        return LogisticRegression(**params, random_state=RANDOM_STATE, max_iter=1000)
+    if algo == 'AdaBoost':
+        return AdaBoostClassifier(**params, random_state=RANDOM_STATE)
+    raise ValueError(f"Unsupported algorithm: {algo}")
+
+def objective(trial):
+    params = suggest_params(trial, param_grid)
+    model = make_model(ALGORITHM, params)
+
+    pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('clf', model)
+    ])
+
+    # cross-validated score on the training set (scaling happens inside pipeline)
+    scores = cross_val_score(pipeline, X_train, y_train, cv=skf, scoring='f1_weighted', n_jobs=-1)
+    return float(scores.mean())
+
+study = optuna.create_study(direction='maximize')
+print('Starting hyperparameter tuning with cross-validation...')
+study.optimize(objective, n_trials=N_TRIALS)
+
+print('Best hyperparameters:', study.best_params)
+print('Best CV score (train):', study.best_value)
+
+# Save best hyperparameters to a file
+best_params_df = pd.DataFrame([study.best_params])
+best_params_df.to_csv(f'results/best_hyperparameters_{ALGORITHM}_{DATASET}.csv', index=False)
+
     
