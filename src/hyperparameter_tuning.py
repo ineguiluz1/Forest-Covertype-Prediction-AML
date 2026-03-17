@@ -9,14 +9,14 @@ from sklearn.linear_model import LogisticRegression
 import optuna
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
+import json
 
 
-ALGORITHM = 'xgboost' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
-DATASET = 'smote_balanced' # file name without extension (e.g. 'equal_undersampled', 'smote_oversampled', 'original')
+ALGORITHM = 'RandomForest' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
+DATASET = 'equal_undersampled' # file name without extension (e.g. 'equal_undersampled', 'smote_oversampled', 'original')
 CV_FOLDS = 5
 RANDOM_STATE = 42
 N_TRIALS = 50
-
 # LOAD DATA
 data = pd.read_parquet(f'data/processed/{DATASET}.parquet')
 
@@ -31,6 +31,15 @@ y_enc = le.fit_transform(y)
 X_train, X_test, y_train, y_test = train_test_split(
     X, y_enc, test_size=0.2, random_state=RANDOM_STATE, stratify=y_enc
 )
+
+train_df = X_train.copy()
+train_df['Cover_Type'] = y_train
+test_df = X_test.copy()
+test_df['Cover_Type'] = y_test
+
+train_df.to_csv(f'data/splits/{DATASET}_train.csv', index=False)
+test_df.to_csv(f'data/splits/{DATASET}_test.csv', index=False)
+
 
 # HYPERPARAMETER TUNING
 if ALGORITHM == 'xgboost':
@@ -122,6 +131,6 @@ print('Best CV score (train):', study.best_value)
 
 # Save best hyperparameters to a file
 best_params_df = pd.DataFrame([study.best_params])
-best_params_df.to_csv(f'results/best_hyperparameters_{ALGORITHM}_{DATASET}.csv', index=False)
+best_params_df.to_json(f'best_hyperparameters/best_hyperparameters_{ALGORITHM}_{DATASET}.json', orient='records', indent=4)
 
     
