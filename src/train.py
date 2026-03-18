@@ -1,17 +1,18 @@
 import pandas as pd
 import json
-from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, VotingClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.tree import DecisionTreeClassifier
 import joblib
 
 # PARAMETROS
-DATASET = "equal_undersampled"
-ALGORITHM = "RandomForest"
+DATASET = "NearMiss_equal"
+ALGORITHM = "Soft-Voting-Clf"
 
 # Load data
 train_data = pd.read_csv(f"data/splits/{DATASET}_train.csv")
@@ -42,8 +43,27 @@ def make_model(algo, params):
         return SVC(**params, probability=False, random_state=42)
     if algo == 'LogisticRegression':
         return LogisticRegression(**params, random_state=42, max_iter=1000)
-    if algo == 'AdaBoost':
-        return AdaBoostClassifier(**params, random_state=42)
+    if algo == 'AdaBoost-RF':
+        return AdaBoostClassifier(**params, estimator=DecisionTreeClassifier(max_depth=15),random_state=42)
+    if algo == 'AdaBoost-SVC':
+        return AdaBoostClassifier(**params, estimator=SVC(probability=True, kernel='rbf'),random_state=42)
+    if algo == 'Soft-Voting-Clf':
+        rf = RandomForestClassifier(
+            n_estimators=params['rf_n_estimators'],
+            max_depth=params['rf_max_depth'],
+            min_samples_split=params['rf_min_samples_split'],
+            n_jobs=-1,
+            random_state=42
+        )
+        lr = LogisticRegression(
+            C=params['lr_C'],
+            max_iter=1000,
+            random_state=42
+        )
+        return VotingClassifier(
+            estimators=[('rf', rf), ('lr', lr)],
+            voting='soft'
+        )
     raise ValueError(f"Unsupported algorithm: {algo}")
 
 model = make_model(ALGORITHM, best_hyperparameters)
