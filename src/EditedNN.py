@@ -3,7 +3,7 @@ from collections import Counter
 from imblearn.under_sampling import EditedNearestNeighbours
 from sklearn.preprocessing import LabelEncoder
 
-DATA_DIR = 'data/interim/df_processed.parquet'
+DATA_DIR = '../data/interim/df_processed.parquet'
 df = pd.read_parquet(DATA_DIR)
 
 enc = LabelEncoder()
