@@ -3,7 +3,7 @@ from sklearn.discriminant_analysis import StandardScaler
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
-from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, VotingClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, VotingClassifier, BaggingClassifier, GradientBoostingClassifier, StackingClassifier
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
@@ -13,11 +13,11 @@ from sklearn.pipeline import Pipeline
 import json
 
 
-ALGORITHM = 'Soft-Voting-Clf' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
+ALGORITHM = 'StackingClassifier' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
 DATASET = 'NearMiss_equal' # file name without extension (e.g. 'equal_undersampled', 'smote_oversampled', 'original')
 CV_FOLDS = 5
 RANDOM_STATE = 42
-N_TRIALS = 50
+N_TRIALS = 10
 # LOAD DATA
 data = pd.read_parquet(f'data/processed/{DATASET}.parquet')
 
@@ -96,6 +96,40 @@ elif ALGORITHM == 'Soft-Voting-Clf':
         'rf_min_samples_split': [2, 5],
         'lr_C': [0.001, 0.01, 0.1, 1],
     }
+elif ALGORITHM == 'Hard-Voting-Clf':
+    param_grid = {
+        'rf_n_estimators': [100, 200, 300],
+        'rf_max_depth': [10, 20, None],
+        'rf_min_samples_split': [2, 5],
+        'dt_max_depth': [5, 10, 15],
+    }
+elif ALGORITHM == 'BaggingClassifier':
+    param_grid = {
+        'n_estimators': [50, 100, 200, 300],
+        'max_samples': [0.5, 0.7, 0.8, 1.0],
+        'max_features': [0.5, 0.7, 0.8, 1.0],
+        'bootstrap': [True, False],
+        'base_max_depth': [5, 10, 15, 20],
+    }
+elif ALGORITHM == 'GradientBoostingClassifier':
+    param_grid = {
+        'n_estimators': [100, 150, 200, 300],
+        'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.15],
+        'max_depth': [3, 4, 5, 7, 9],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'subsample': [0.7, 0.8, 0.9, 1.0],
+        'max_features': ['sqrt', 'log2', None],
+    }
+elif ALGORITHM == 'StackingClassifier':
+    param_grid = {
+        'rf_n_estimators': [100, 200],
+        'rf_max_depth': [10, 20],
+        'gb_n_estimators': [100, 150],
+        'gb_learning_rate': [0.01, 0.1],
+        'gb_max_depth': [3, 5],
+        'meta_C': [0.1, 1, 10],
+    }
 # CV splitter
 skf = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
 
@@ -139,6 +173,69 @@ def make_model(algo, params):
             estimators=[('rf', rf), ('lr', lr)],
             voting='soft'
         )
+    if algo == 'Hard-Voting-Clf':
+        rf = RandomForestClassifier(
+            n_estimators=params['rf_n_estimators'],
+            max_depth=params['rf_max_depth'],
+            min_samples_split=params['rf_min_samples_split'],
+            n_jobs=-1,
+            random_state=RANDOM_STATE
+        )
+        dt = DecisionTreeClassifier(
+            max_depth=params['dt_max_depth'],
+            random_state=RANDOM_STATE
+        )
+        return VotingClassifier(
+            estimators=[('rf', rf), ('dt', dt)],
+            voting='hard'
+        )
+    if algo == 'BaggingClassifier':
+        return BaggingClassifier(
+            estimator=DecisionTreeClassifier(
+                max_depth=params['base_max_depth'],
+                random_state=RANDOM_STATE
+            ),
+            n_estimators=params['n_estimators'],
+            max_samples=params['max_samples'],
+            max_features=params['max_features'],
+            bootstrap=params['bootstrap'],
+            n_jobs=-1,
+            random_state=RANDOM_STATE
+        )
+    if algo == 'GradientBoostingClassifier':
+        return GradientBoostingClassifier(
+            n_estimators=params['n_estimators'],
+            learning_rate=params['learning_rate'],
+            max_depth=params['max_depth'],
+            min_samples_split=params['min_samples_split'],
+            min_samples_leaf=params['min_samples_leaf'],
+            subsample=params['subsample'],
+            max_features=params['max_features'],
+            random_state=RANDOM_STATE
+        )
+    if algo == 'StackingClassifier':
+        rf = RandomForestClassifier(
+            n_estimators=params['rf_n_estimators'],
+            max_depth=params['rf_max_depth'],
+            n_jobs=-1,
+            random_state=RANDOM_STATE
+        )
+        gb = GradientBoostingClassifier(
+            n_estimators=params['gb_n_estimators'],
+            learning_rate=params['gb_learning_rate'],
+            max_depth=params['gb_max_depth'],
+            random_state=RANDOM_STATE
+        )
+        meta_learner = LogisticRegression(
+            C=params['meta_C'],
+            max_iter=1000,
+            random_state=RANDOM_STATE
+        )
+        return StackingClassifier(
+            estimators=[('rf', rf), ('gb', gb)],
+            final_estimator=meta_learner,
+            cv=5
+        )
     raise ValueError(f"Unsupported algorithm: {algo}")
 
 def objective(trial):
@@ -150,11 +247,26 @@ def objective(trial):
         ('clf', model)
     ])
 
-    # cross-validated score on the training set (scaling happens inside pipeline)
-    scores = cross_val_score(pipeline, X_train, y_train, cv=skf, scoring='f1_weighted', n_jobs=-1)
-    return float(scores.mean())
+    fold_scores = []
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
+        X_fold_train, X_fold_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
+        y_fold_train, y_fold_val = y_train[train_idx], y_train[val_idx]
+        
+        pipeline.fit(X_fold_train, y_fold_train)
+        score = pipeline.score(X_fold_val, y_fold_val)
+        fold_scores.append(score)
+        
+        # Report intermediate value for pruning
+        trial.report(score, fold)
+        
+        # Pruning
+        if trial.should_prune():
+            raise optuna.TrialPruned()
+    
+    return float(sum(fold_scores) / len(fold_scores))
 
-study = optuna.create_study(direction='maximize')
+pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
+study = optuna.create_study(direction='maximize', pruner=pruner)
 print('Starting hyperparameter tuning with cross-validation...')
 study.optimize(objective, n_trials=N_TRIALS)
 
