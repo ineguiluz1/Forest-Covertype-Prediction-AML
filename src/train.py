@@ -87,6 +87,7 @@ def make_model(algo, params):
             max_features=params['max_features'],
             bootstrap=params['bootstrap'],
             n_jobs=-1,
+            # oob_score = True,
             random_state=42
         )
     if algo == 'GradientBoosting-Clf':
