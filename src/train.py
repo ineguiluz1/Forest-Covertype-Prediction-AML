@@ -2,7 +2,6 @@ import pandas as pd
 import json
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, VotingClassifier, BaggingClassifier, GradientBoostingClassifier, StackingClassifier
 from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler

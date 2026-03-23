@@ -1,34 +1,37 @@
 import pandas as pd
-from sklearn.discriminant_analysis import StandardScaler
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.metrics import f1_score
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, VotingClassifier, BaggingClassifier, GradientBoostingClassifier, StackingClassifier
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
+from imblearn.pipeline import Pipeline as ImbPipeline
+from imblearn.under_sampling import NearMiss
 import optuna
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
 import json
 
 
-ALGORITHM = 'StackingClassifier' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
+ALGORITHM = 'AdaBoost-RF' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
 DATASET = 'train_original' # file name without extension (e.g. 'equal_undersampled', 'smote_oversampled', 'original')
-CV_FOLDS = 5
+CV_FOLDS = 3
 RANDOM_STATE = 42
 N_TRIALS = 10
 # LOAD DATA
 data = pd.read_parquet(f'data/splits/{DATASET}.parquet')
 
-selected_features = ['Elevation', 'Horizontal_Distance_To_Hydrology', 
-                    'Horizontal_Distance_To_Roadways', 'Hillshade_Noon',
-                    'Horizontal_Distance_To_Fire_Points', 'Wilderness_Area1',
-                    'Wilderness_Area3', 'Wilderness_Area4', 
-                    'Soil_Type2', 'Soil_Type4', 'Soil_Type10', 'Soil_Type12',
-                    'Soil_Type22', 'Soil_Type23', 'Soil_Type38', 'Soil_Type39',
-                    'Euclidean_Distance_To_Hydrology', 'Distance_To_Hydrology_To_Roadways_Ratio',
-                    'Total_Distance', 'Aspect_North_South', 'Cover_Type'] 
+selected_features = [
+                    'Elevation', 'Aspect', 'Horizontal_Distance_To_Hydrology',
+                    'Vertical_Distance_To_Hydrology', 'Horizontal_Distance_To_Roadways', 'Hillshade_9am',
+                    'Hillshade_Noon', 'Horizontal_Distance_To_Fire_Points', 'Wilderness_Area1', 'Wilderness_Area2', 
+                    'Wilderness_Area3', 'Wilderness_Area4', 'Soil_Type2', 'Soil_Type4', 'Soil_Type10', 
+                    'Soil_Type12', 'Soil_Type22', 'Soil_Type23', 'Soil_Type38', 'Soil_Type39', 'Soil_Type40', 
+                    'Euclidean_Distance_To_Hydrology', 'Distance_To_Hydrology_To_Roadways_Ratio', 'Distance_To_Fire_To_Hydrology_Ratio', 
+                    'Total_Distance', 'Hydrology_Slope', 'Aspect_North_South', 'Cover_Type'
+                    ] 
 
 data = data[selected_features]
 
@@ -40,25 +43,13 @@ y = data['Cover_Type']
 
 # Encode labels to 0..n_classes-1 (XGBoost expects that)
 le = LabelEncoder()
-y_enc = le.fit_transform(y)
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y_enc, test_size=0.2, random_state=RANDOM_STATE, stratify=y_enc
-)
-
-train_df = X_train.copy()
-train_df['Cover_Type'] = y_train
-test_df = X_test.copy()
-test_df['Cover_Type'] = y_test
-
-train_df.to_csv(f'data/splits/{DATASET}_train.csv', index=False)
-test_df.to_csv(f'data/splits/{DATASET}_test.csv', index=False)
+y = le.fit_transform(y)
 
 
 # HYPERPARAMETER TUNING
 if ALGORITHM == 'xgboost':
     param_grid = {
-        'n_estimators': [100, 200, 300, 350, 500],
+        'n_estimators': [100, 150, 200],
         'max_depth': [3, 5, 7, 9, 12, 15],
         'learning_rate': [0.01, 0.1, 0.2, 0.25, 0.4, 0.5],
         'subsample': [0.8, 1.0, 0.75, 0.9],
@@ -66,7 +57,7 @@ if ALGORITHM == 'xgboost':
     }
 elif ALGORITHM == 'lightgbm':
     param_grid = {
-        'n_estimators': [100, 200, 300, 250, 400],
+        'n_estimators': [100, 200, 250],
         'max_depth': [3, 5, 7, 9, 12, 15, 20],
         'learning_rate': [0.01, 0.1, 0.2, 0.25, 0.4, 0.5],
         'subsample': [0.8, 1.0],
@@ -81,31 +72,31 @@ elif ALGORITHM == 'RandomForest':
     }
 elif ALGORITHM == 'AdaBoost-RF':
     param_grid = {
-        'n_estimators': [50, 100, 150, 200, 300, 500],
+        'n_estimators': [50, 100, 150, 200],
         'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2, 0.5],
     }
 elif ALGORITHM == 'AdaBoost-SVC':
     param_grid = {
-        'n_estimators': [50, 100, 150, 200, 300, 500],
+        'n_estimators': [50, 100, 150, 200],
         'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.2, 0.5],
     }
 elif ALGORITHM == 'Soft-Voting-Clf':
     param_grid = {
-        'rf_n_estimators': [100, 200, 300],
+        'rf_n_estimators': [100, 200],
         'rf_max_depth': [10, 20, None],
         'rf_min_samples_split': [2, 5],
         'lr_C': [0.001, 0.01, 0.1, 1],
     }
 elif ALGORITHM == 'Hard-Voting-Clf':
     param_grid = {
-        'rf_n_estimators': [100, 200, 300],
+        'rf_n_estimators': [100, 200],
         'rf_max_depth': [10, 20, None],
         'rf_min_samples_split': [2, 5],
         'dt_max_depth': [5, 10, 15],
     }
 elif ALGORITHM == 'BaggingClassifier':
     param_grid = {
-        'n_estimators': [50, 100, 200, 300],
+        'n_estimators': [50, 100, 200],
         'max_samples': [0.5, 0.7, 0.8, 1.0],
         'max_features': [0.5, 0.7, 0.8, 1.0],
         'bootstrap': [True, False],
@@ -113,7 +104,7 @@ elif ALGORITHM == 'BaggingClassifier':
     }
 elif ALGORITHM == 'GradientBoostingClassifier':
     param_grid = {
-        'n_estimators': [100, 150, 200, 300],
+        'n_estimators': [100, 150, 200],
         'learning_rate': [0.001, 0.01, 0.05, 0.1, 0.15],
         'max_depth': [3, 4, 5, 7, 9],
         'min_samples_split': [2, 5, 10],
@@ -242,24 +233,24 @@ def objective(trial):
     params = suggest_params(trial, param_grid)
     model = make_model(ALGORITHM, params)
 
-    pipeline = Pipeline([
-        ('scaler', StandardScaler()),
+    pipeline = ImbPipeline([
+        ('undersample', NearMiss(version=1)), 
         ('clf', model)
     ])
 
     fold_scores = []
-    for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
-        X_fold_train, X_fold_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
-        y_fold_train, y_fold_val = y_train[train_idx], y_train[val_idx]
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X, y)):
+        X_fold_train, X_fold_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_fold_train, y_fold_val = y[train_idx], y[val_idx]
         
         pipeline.fit(X_fold_train, y_fold_train)
-        score = pipeline.score(X_fold_val, y_fold_val)
+        
+        y_pred = pipeline.predict(X_fold_val)
+        
+        score = f1_score(y_fold_val, y_pred, average='macro', zero_division=0)
         fold_scores.append(score)
         
-        # Report intermediate value for pruning
         trial.report(score, fold)
-        
-        # Pruning
         if trial.should_prune():
             raise optuna.TrialPruned()
     
@@ -267,11 +258,11 @@ def objective(trial):
 
 pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
 study = optuna.create_study(direction='maximize', pruner=pruner)
-print('Starting hyperparameter tuning with cross-validation...')
+print(f'Starting hyperparameter tuning for {ALGORITHM} with NearMiss sampling...')
 study.optimize(objective, n_trials=N_TRIALS)
 
 print('Best hyperparameters:', study.best_params)
-print('Best CV score (train):', study.best_value)
+print('Best CV score (Macro-F1):', study.best_value)
 
 # Save best hyperparameters to a file
 best_params_df = pd.DataFrame([study.best_params])
