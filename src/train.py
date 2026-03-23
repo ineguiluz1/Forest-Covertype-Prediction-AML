@@ -14,12 +14,10 @@ DATASET = "NearMiss_equal"
 ALGORITHM = "StackingClassifier"
 
 # Load data
-train_data = pd.read_csv(f"data/splits/{DATASET}_train.csv")
-test_data = pd.read_csv(f"data/splits/{DATASET}_test.csv")
+train_data = pd.read_csv(f"data/processed/{DATASET}.parquet")
 X_train = train_data.drop('Cover_Type', axis=1)
 y_train = train_data['Cover_Type']
-X_test = test_data.drop('Cover_Type', axis=1)
-y_test = test_data['Cover_Type']
+
 
 print(X_train.shape)
 
@@ -55,8 +53,12 @@ def make_model(algo, params):
             max_iter=1000,
             random_state=42
         )
+        dt = DecisionTreeClassifier(
+            criterion=params['dt_criterion'],
+            max_depth=params['dt_max_depth']
+        )
         return VotingClassifier(
-            estimators=[('rf', rf), ('lr', lr)],
+            estimators=[('rf', rf), ('lr', lr), ('dt', dt)],
             voting='soft'
         )
     if algo == 'Hard-Voting-Clf':
