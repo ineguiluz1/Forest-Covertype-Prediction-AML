@@ -1,0 +1,8 @@
+[
+    {
+        "rf_n_estimators":200,
+        "rf_max_depth":20,
+        "dt_max_depth":15,
+        "dt_criterion":"gini"
+    }
+]

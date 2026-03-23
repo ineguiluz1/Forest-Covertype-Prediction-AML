@@ -4,25 +4,40 @@ from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, VotingC
 from xgboost import XGBClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.tree import DecisionTreeClassifier
 import joblib
 
 # PARAMETROS
 DATASET = "NearMiss_equal"
-ALGORITHM = "StackingClassifier"
+ALGORITHM = "AdaBoost-RF"
+
+selected_features = [
+                    'Elevation', 'Aspect', 'Horizontal_Distance_To_Hydrology',
+                    'Vertical_Distance_To_Hydrology', 'Horizontal_Distance_To_Roadways', 'Hillshade_9am',
+                    'Hillshade_Noon', 'Horizontal_Distance_To_Fire_Points', 'Wilderness_Area1', 'Wilderness_Area2', 
+                    'Wilderness_Area3', 'Wilderness_Area4', 'Soil_Type2', 'Soil_Type4', 'Soil_Type10', 
+                    'Soil_Type12', 'Soil_Type22', 'Soil_Type23', 'Soil_Type38', 'Soil_Type39', 'Soil_Type40', 
+                    'Euclidean_Distance_To_Hydrology', 'Distance_To_Hydrology_To_Roadways_Ratio', 'Distance_To_Fire_To_Hydrology_Ratio', 
+                    'Total_Distance', 'Hydrology_Slope', 'Aspect_North_South', 'Cover_Type'
+                    ] 
 
 # Load data
-train_data = pd.read_csv(f"data/processed/{DATASET}.parquet")
+train_data = pd.read_parquet(f"data/processed/{DATASET}.parquet")
+train_data = train_data[selected_features]
 X_train = train_data.drop('Cover_Type', axis=1)
 y_train = train_data['Cover_Type']
+
+if ALGORITHM == 'xgboost':
+    le = LabelEncoder()
+    y_train = le.fit_transform(y_train)
 
 
 print(X_train.shape)
 
 # Load Hyperparameters
-with open(f'best_hyperparameters/best_hyperparameters_{ALGORITHM}_{DATASET}.json', 'r') as f:
+with open(f'best_hyperparameters/best_hyperparameters_{ALGORITHM}_train_original.json', 'r') as f:
     best_hyperparameters = json.load(f)
 best_hyperparameters = best_hyperparameters[0]
 
@@ -109,21 +124,13 @@ def make_model(algo, params):
             n_jobs=-1,
             random_state=42
         )
-        gb = GradientBoostingClassifier(
-            n_estimators=params['gb_n_estimators'],
-            learning_rate=params['gb_learning_rate'],
-            max_depth=params['gb_max_depth'],
-            random_state=42
-        )
-        meta_learner = LogisticRegression(
-            C=params['meta_C'],
-            max_iter=1000,
-            random_state=42
+        dt = DecisionTreeClassifier(
+            criterion=params['dt_criterion'],
+            max_depth=params['dt_max_depth']
         )
         return StackingClassifier(
-            estimators=[('rf', rf), ('gb', gb)],
-            final_estimator=meta_learner,
-            cv=5
+            estimators=[('rf', rf), ('dt', dt)],
+            cv=3
         )
     raise ValueError(f"Unsupported algorithm: {algo}")
 

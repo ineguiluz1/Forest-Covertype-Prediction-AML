@@ -15,7 +15,7 @@ from sklearn.pipeline import Pipeline
 import json
 
 
-ALGORITHM = 'AdaBoost-RF' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
+ALGORITHM = 'StackingClassifier' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
 DATASET = 'train_original' # file name without extension (e.g. 'equal_undersampled', 'smote_oversampled', 'original')
 CV_FOLDS = 3
 RANDOM_STATE = 42
@@ -86,6 +86,8 @@ elif ALGORITHM == 'Soft-Voting-Clf':
         'rf_max_depth': [10, 20, None],
         'rf_min_samples_split': [2, 5],
         'lr_C': [0.001, 0.01, 0.1, 1],
+        'dt_max_depth': [5,10,15,20],
+        'dt_criterion': ['gini', 'entropy', 'log_loss' ]
     }
 elif ALGORITHM == 'Hard-Voting-Clf':
     param_grid = {
@@ -93,6 +95,7 @@ elif ALGORITHM == 'Hard-Voting-Clf':
         'rf_max_depth': [10, 20, None],
         'rf_min_samples_split': [2, 5],
         'dt_max_depth': [5, 10, 15],
+        'dt_criterion': ['gini', 'entropy', 'log_loss' ]
     }
 elif ALGORITHM == 'BaggingClassifier':
     param_grid = {
@@ -116,10 +119,8 @@ elif ALGORITHM == 'StackingClassifier':
     param_grid = {
         'rf_n_estimators': [100, 200],
         'rf_max_depth': [10, 20],
-        'gb_n_estimators': [100, 150],
-        'gb_learning_rate': [0.01, 0.1],
-        'gb_max_depth': [3, 5],
-        'meta_C': [0.1, 1, 10],
+        'dt_max_depth': [5, 10, 15],
+        'dt_criterion': ['gini', 'entropy', 'log_loss']
     }
 # CV splitter
 skf = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
@@ -160,8 +161,12 @@ def make_model(algo, params):
             max_iter=1000,
             random_state=RANDOM_STATE
         )
+        dt = DecisionTreeClassifier(
+            criterion=params['dt_criterion'],
+            max_depth=params['dt_max_depth']
+        )
         return VotingClassifier(
-            estimators=[('rf', rf), ('lr', lr)],
+            estimators=[('rf', rf), ('lr', lr), ('dt', dt)],
             voting='soft'
         )
     if algo == 'Hard-Voting-Clf':
@@ -211,21 +216,13 @@ def make_model(algo, params):
             n_jobs=-1,
             random_state=RANDOM_STATE
         )
-        gb = GradientBoostingClassifier(
-            n_estimators=params['gb_n_estimators'],
-            learning_rate=params['gb_learning_rate'],
-            max_depth=params['gb_max_depth'],
-            random_state=RANDOM_STATE
-        )
-        meta_learner = LogisticRegression(
-            C=params['meta_C'],
-            max_iter=1000,
-            random_state=RANDOM_STATE
+        dt = DecisionTreeClassifier(
+            criterion=params['dt_criterion'],
+            max_depth=params['dt_max_depth']
         )
         return StackingClassifier(
-            estimators=[('rf', rf), ('gb', gb)],
-            final_estimator=meta_learner,
-            cv=5
+            estimators=[('rf', rf), ('dt', dt)],
+            cv=3
         )
     raise ValueError(f"Unsupported algorithm: {algo}")
 

@@ -1,0 +1,10 @@
+[
+    {
+        "rf_n_estimators":100,
+        "rf_max_depth":null,
+        "rf_min_samples_split":5,
+        "lr_C":0.001,
+        "dt_max_depth":10,
+        "dt_criterion":"entropy"
+    }
+]
