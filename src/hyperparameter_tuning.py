@@ -14,12 +14,12 @@ import json
 
 
 ALGORITHM = 'StackingClassifier' # Options: 'xgboost', 'lightgbm', 'RandomForest', 'SVM', 'LogisticRegression', 'AdaBoost'
-DATASET = 'NearMiss_equal' # file name without extension (e.g. 'equal_undersampled', 'smote_oversampled', 'original')
+DATASET = 'train_original' # file name without extension (e.g. 'equal_undersampled', 'smote_oversampled', 'original')
 CV_FOLDS = 5
 RANDOM_STATE = 42
 N_TRIALS = 10
 # LOAD DATA
-data = pd.read_parquet(f'data/processed/{DATASET}.parquet')
+data = pd.read_parquet(f'data/splits/{DATASET}.parquet')
 
 selected_features = ['Elevation', 'Horizontal_Distance_To_Hydrology', 
                     'Horizontal_Distance_To_Roadways', 'Hillshade_Noon',
